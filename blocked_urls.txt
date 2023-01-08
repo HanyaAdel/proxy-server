@@ -1,3 +1,4 @@
-www.linkedin.com
-www.google.com
+www.linkedin.com/
+www.google.com/
+http://gaia.cs.umass.edu/wireshark-labs/alice.txt/
 

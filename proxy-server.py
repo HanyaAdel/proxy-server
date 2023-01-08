@@ -8,8 +8,10 @@ def isValidURL(url):
 
     #check whether the url is in the blocked urls
     for s in outputdata:
-        s = s.decode()[:-2] 
+        s = s[:-2] 
+        print(s, "\t", url)
         if (s == url): 
+            print("not valid")
             return False
         
     return True
