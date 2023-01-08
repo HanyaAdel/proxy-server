@@ -1,8 +1,8 @@
 from socket import *
-from datetime import datetime, date
+from datetime import datetime
 
 #maximum time in seconds
-MAX_CACHED_TIME = 1 * 60
+TTL = 1 * 60
 
 def isValidURL(url):
 	#opening the blocked urls file.
@@ -20,16 +20,16 @@ def isValidURL(url):
 			
 			
 def renderBlockedPage(tcpCliSock):
-	tcpCliSock.send(('HTTP/1.0 200 OK\n').encode('utf-8'))
-	tcpCliSock.send(('Content-Type: text/html\n').encode('utf-8'))
-	tcpCliSock.send(('\n').encode('utf-8'))
-	tcpCliSock.send(("""
+	tcpCliSock.send(b'HTTP/1.0 200 OK\n')
+	tcpCliSock.send(b'Content-Type: text/html\n')
+	tcpCliSock.send(b'\n')
+	tcpCliSock.send(b"""
 		<html>
 		<body>
 		<h1>This URL is blocked</h1>
 		</body>
 		</html>
-	""").encode('utf-8'))    
+	""")    
 
 def timeExceeded(cachedTime):
 	cachedTime = cachedTime[:-2]
@@ -38,10 +38,34 @@ def timeExceeded(cachedTime):
 	now = datetime.now()
 	diff = (now - cachedTime).total_seconds()
 
-	if (diff > MAX_CACHED_TIME):
+	if (diff > TTL):
 		return True
 	return False
 
+
+def isValidResponse(response):
+	print("response code ",response[9:12])
+
+	if response[9:10]==b'4' or response[9:10]==b'5':
+		msg = response[9:].split(b"\r\n")[0]
+		return False
+
+	if response[9:12] == b"204":
+		return False
+	return True
+
+
+def renderErrorPage():
+	tcpCliSock.send(b'HTTP/1.0 200 OK\n')
+	tcpCliSock.send(b'Content-Type: text/html\n')
+	tcpCliSock.send(b'\n')
+	tcpCliSock.send(b"""
+		<html>
+		<body>
+		<h1>The file you asked for is not found</h1>
+		</body>
+		</html>
+	""")  	
 
 # Create a server socket, bind it to a port and start listening
 tcpSerPort = 8888
@@ -57,94 +81,95 @@ while True:
 	tcpCliSock, addr = tcpSerSock.accept()
 	print ('Received a connection from:', addr)
 	message = tcpCliSock.recv(2048)
-	if len(message) != 0:
-		print ("Message received: ", message)
-		print ("------------------------")
+	print ("Message received: ", message)
+	print ("------------------------")
 
-		# Extract the filename from the given message
-		filename = message.split()[1].partition(b"//")[2]
-		search = message.split()[1].split(b"//")[1]
-		print ("filename: ", filename)
-		
-		if (not isValidURL(filename)):
-			renderBlockedPage(tcpCliSock=tcpCliSock)
+	# Extract the filename from the given message
+	filename = message.split()[1].partition(b"//")[2]
+	search = message.split()[1].split(b"//")[1]
+	print ("filename: ", filename)
+	
+	if (not isValidURL(filename)):
+		renderBlockedPage(tcpCliSock=tcpCliSock)
+		continue
 
-
-
-		else:
-			fileExist = "false"
-			isCachedFileValid = True
-			filetouse = b"/" + filename.replace(b"/",b"")
-			print ("file to use: ",filetouse)
-			try:
-				# Check whether the file exist in the cache
-				f = open(filetouse[1:], "rb")
-				outputdata = f.readlines()
-				#print("output data: ", outputdata)
-				fileExist = "true"
-
-				# Generating a response message
-
-				resp = b""
-				for i in range(len(outputdata)):
-					if i ==0:
-						if (timeExceeded(outputdata[i])):
-							isCachedFileValid = False
-							raise IOError
-					else:
-						resp += outputdata[i]
-				
-				tcpCliSock.send(resp)
-
-				f.close()
-				print ('Read from cache')
-
-			# Error handling for file not found in cache
-			except IOError:
-				if fileExist == "false" or (not isCachedFileValid):
-					# Create a socket on the proxy server
-					c = socket(AF_INET, SOCK_STREAM)
-					hostn = filename.split(b'/')[0].replace(b"www.", b"", 1)
-					print ("host n: ", hostn)
-					try:
-						# Connect to the socket to port 80
-						print("here 1")
-						c.connect((hostn,80))
-						print('Socket connected to port 80 of the host')
-				
-						# Create a temporary file on this socket and ask port 80 for the file requested by the client
-						req = b"GET " + b"http://" + search + b" HTTP/1.0\r\n\r\n"
-						c.send(req)
-				
-						# Read the response
-						resp = c.recv(4096)                    
-				
+	isCachedFileValid = True
+	try:
 					
-						# Create a new file in the cache for the requested file.
-						# Also send the response in the buffer to client socket and the corresponding file in the cache
-						response = b""
-						while len(resp) > 0:
-							response += resp
-							resp = c.recv(4096)
-						
-						if(filename[-1:] == b'/'):
-							filename = filename[:-1]
-							
-						tmpFile = open(b"./" + filename.replace(b"/",b"") ,"wb")
-						now = datetime.now()
-						date_time = now.strftime("%Y-%m-%d %H:%M:%S.f\r\n")
-						date_time = date_time.encode()
+		# Check whether the file exist in the cache
 
-						tmpFile.write(date_time + response)
-						tmpFile.close()
-						tcpCliSock.send(response)
-					except:
-						print ("Illegal request")
-				else:
-					# HTTP response message for file not found
-					tcpCliSock.send(b"HTTP/1.0 404 sendErrorErrorError\r\n")                             
-					tcpCliSock.send(b"Content-Type:text/html\r\n")
-					tcpCliSock.send(b"\r\n")
+		print("Looking for file in cache")
+
+		filetouse = b"/" + filename.replace(b"/",b"")
+		f = open(filetouse[1:], "rb")
+
+		# reading the content of the file
+		outputdata = f.readlines()
+
+		# Generating a response message
+		resp = b""
+		for i in range(len(outputdata)):
+			if i ==0:
+				if (timeExceeded(outputdata[i])):
+					isCachedFileValid = False
+					raise IOError
+			else:
+				resp += outputdata[i]
+		
+		tcpCliSock.send(resp)
+
+		f.close()
+		print("Response retrieved from cache")
+
+	# Error handling for file not found in cache
+	except IOError:
+		print ("File not found in cache")
+
+		# Create a socket on the proxy server
+		c = socket(AF_INET, SOCK_STREAM)
+		hostn = filename.split(b'/')[0].replace(b"www.", b"", 1)
+
+		try:
+			# Connect to the socket to port 80
+			c.connect((hostn,80))
+			print('Socket connected to port 80 of the host')
+	
+			# ask port 80 for the file requested by the client
+			req = b"GET " + b"http://" + search + b" HTTP/1.0\r\n\r\n"
+			print("Request: ", req)
+			c.send(req)
+	
+			# Read the response
+			resp = c.recv(4096)   
+
+
+		
+			response = b""
+			while len(resp) > 0:
+				response += resp
+				resp = c.recv(4096)
+			
+			if isValidResponse(response=response):
+				raise Exception()
+			
+
+
+			# Create a new file in the cache for the requested file.
+			# store the current time along with the data.
+			if(filename[-1:] == b'/'):
+				filename = filename[:-1]
+			tmpFile = open(b"./" + filename.replace(b"/",b"") ,"wb")
+			now = datetime.now()
+			date_time = now.strftime("%Y-%m-%d %H:%M:%S.f\r\n")
+			date_time = date_time.encode()
+
+			tmpFile.write(date_time + response)
+			tmpFile.close()
+			tcpCliSock.send(response)
+
+			print ("Response retrieved from port 80 and added to cache")
+		except:
+			renderErrorPage()
 
 	# Close the client and the server sockets
 	tcpCliSock.close()
