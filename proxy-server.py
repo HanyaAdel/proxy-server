@@ -1,5 +1,8 @@
 from socket import *
+from datetime import datetime, date
 
+#maximum time in seconds
+MAX_CACHED_TIME = 1 * 60
 
 def isValidURL(url):
 	#opening the blocked urls file.
@@ -28,6 +31,16 @@ def renderBlockedPage(tcpCliSock):
 		</html>
 	""").encode('utf-8'))    
 
+def timeExceeded(cachedTime):
+	cachedTime = cachedTime[:-2]
+	cachedTime = cachedTime.decode()
+	cachedTime = datetime.strptime(cachedTime, "%Y-%m-%d %H:%M:%S.f")
+	now = datetime.now()
+	diff = (now - cachedTime).total_seconds()
+
+	if (diff > MAX_CACHED_TIME):
+		return True
+	return False
 
 
 # Create a server socket, bind it to a port and start listening
@@ -60,20 +73,26 @@ while True:
 
 		else:
 			fileExist = "false"
+			isCachedFileValid = True
 			filetouse = b"/" + filename.replace(b"/",b"")
 			print ("file to use: ",filetouse)
 			try:
 				# Check whether the file exist in the cache
 				f = open(filetouse[1:], "rb")
 				outputdata = f.readlines()
-				print("output data: ", outputdata)
+				#print("output data: ", outputdata)
 				fileExist = "true"
 
 				# Generating a response message
 
 				resp = b""
-				for s in outputdata:
-					resp += s
+				for i in range(len(outputdata)):
+					if i ==0:
+						if (timeExceeded(outputdata[i])):
+							isCachedFileValid = False
+							raise IOError
+					else:
+						resp += outputdata[i]
 				
 				tcpCliSock.send(resp)
 
@@ -82,7 +101,7 @@ while True:
 
 			# Error handling for file not found in cache
 			except IOError:
-				if fileExist == "false":
+				if fileExist == "false" or (not isCachedFileValid):
 					# Create a socket on the proxy server
 					c = socket(AF_INET, SOCK_STREAM)
 					hostn = filename.split(b'/')[0].replace(b"www.", b"", 1)
@@ -112,16 +131,20 @@ while True:
 							filename = filename[:-1]
 							
 						tmpFile = open(b"./" + filename.replace(b"/",b"") ,"wb")
-						tmpFile.write(response)
+						now = datetime.now()
+						date_time = now.strftime("%Y-%m-%d %H:%M:%S.f\r\n")
+						date_time = date_time.encode()
+
+						tmpFile.write(date_time + response)
 						tmpFile.close()
 						tcpCliSock.send(response)
 					except:
 						print ("Illegal request")
 				else:
 					# HTTP response message for file not found
-					tcpCliSock.send("HTTP/1.0 404 sendErrorErrorError\r\n")                             
-					tcpCliSock.send("Content-Type:text/html\r\n")
-					tcpCliSock.send("\r\n")
+					tcpCliSock.send(b"HTTP/1.0 404 sendErrorErrorError\r\n")                             
+					tcpCliSock.send(b"Content-Type:text/html\r\n")
+					tcpCliSock.send(b"\r\n")
 
 	# Close the client and the server sockets
 	tcpCliSock.close()
