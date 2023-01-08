@@ -93,7 +93,6 @@ while True:
 		renderBlockedPage(tcpCliSock=tcpCliSock)
 		continue
 
-	isCachedFileValid = True
 	try:
 					
 		# Check whether the file exist in the cache
@@ -111,7 +110,7 @@ while True:
 		for i in range(len(outputdata)):
 			if i ==0:
 				if (timeExceeded(outputdata[i])):
-					isCachedFileValid = False
+					print("File in cache is outdated")
 					raise IOError
 			else:
 				resp += outputdata[i]
@@ -123,7 +122,7 @@ while True:
 
 	# Error handling for file not found in cache
 	except IOError:
-		print ("File not found in cache")
+		print ("forwarding request to server")
 
 		# Create a socket on the proxy server
 		c = socket(AF_INET, SOCK_STREAM)
@@ -149,7 +148,7 @@ while True:
 				response += resp
 				resp = c.recv(4096)
 			
-			if isValidResponse(response=response):
+			if (not isValidResponse(response=response)):
 				raise Exception()
 			
 
